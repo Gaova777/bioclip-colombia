@@ -12,6 +12,7 @@ RUN uv export --frozen --no-dev --no-emit-project --no-hashes | grep -v -E '^(nv
 
 COPY src ./src
 COPY data/candidates ./data/candidates
+COPY data/calibration.json ./data/calibration.json
 RUN pip install --no-cache-dir --no-deps .
 
 # download both models while building, so the container starts without fetching ~1 GB

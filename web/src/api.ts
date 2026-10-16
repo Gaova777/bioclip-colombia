@@ -25,3 +25,7 @@ export function classify(image: Blob): Promise<Classification> {
 export function candidates(): Promise<Candidate[]> {
   return request('/candidates')
 }
+
+export function health(): Promise<{ threshold: number }> {
+  return request('/health')
+}

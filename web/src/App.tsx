@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { candidates, classify } from './api'
+import { candidates, classify, health } from './api'
 import { ModelPanel } from './ModelPanel'
 import type { Classification } from './tree'
 
@@ -35,6 +35,10 @@ export default function App() {
   const [commonNames, setCommonNames] = useState(new Map<string, string>())
 
   useEffect(() => {
+    // the default threshold is the one picked on the validation set (scripts/calibrate.py)
+    health()
+      .then((h) => setThreshold(h.threshold))
+      .catch(() => {})
     candidates()
       .then((list) => setCommonNames(new Map(list.map((c) => [c.lineage.slice(-2).join(' '), c.common_name]))))
       .catch(() => setError('The API is not answering. Is the backend running?'))

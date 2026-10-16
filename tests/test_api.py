@@ -31,7 +31,7 @@ class FakeEncoder:
 
 @pytest.fixture
 def client():
-    app = create_app(load=lambda: (TAXA, {"bioclip": Classifier(FakeEncoder(), TAXA)}))
+    app = create_app(load=lambda: {"taxa": TAXA, "models": {"bioclip": Classifier(FakeEncoder(), TAXA)}, "threshold": 0.7})
     with TestClient(app) as c:
         yield c
 
@@ -64,4 +64,4 @@ def test_classify_rejects_files_that_are_not_images(client):
 
 def test_candidates_and_health(client):
     assert len(client.get("/candidates").json()) == 3
-    assert client.get("/health").json() == {"status": "ok", "models": ["bioclip"]}
+    assert client.get("/health").json() == {"status": "ok", "models": ["bioclip"], "threshold": 0.7}
