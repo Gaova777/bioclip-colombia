@@ -21,3 +21,4 @@ data/valset/images/
 *.onnx
 .ipynb_checkpoints/
 *.log
+models/

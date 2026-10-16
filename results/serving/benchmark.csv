@@ -1,0 +1,5 @@
+variant,image_encoder_mb,latency_p50_ms,latency_p95_ms,species_accuracy,genus_accuracy
+"pytorch, GPU",344.8,10.5,12.0,0.778,0.802
+"pytorch, CPU",344.8,96.3,98.9,0.778,0.802
+"onnx, CPU",345.2,50.6,52.8,0.775,0.801
+"onnx int8, CPU",87.6,32.0,34.1,0.733,0.765
