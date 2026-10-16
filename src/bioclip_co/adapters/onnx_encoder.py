@@ -30,8 +30,8 @@ class OnnxEncoder:
         image_file = f"{name}_image_int8.onnx" if int8 else f"{name}_image.onnx"  # the text encoder is never INT8
         self.name = name
         self.batch_size = batch_size
+        self.model_dir = model_dir
         self.image = ort.InferenceSession(model_dir / image_file, providers=["CPUExecutionProvider"])
-        self.text = ort.InferenceSession(model_dir / f"{name}_text.onnx", providers=["CPUExecutionProvider"])
         self.logit_scale = float((model_dir / f"{name}_logit_scale.txt").read_text())
 
     def encode_images(self, paths: Sequence[Path]) -> np.ndarray:
@@ -44,8 +44,10 @@ class OnnxEncoder:
     def encode_texts(self, texts: Sequence[str]) -> np.ndarray:
         import open_clip  # only the tokenizer; it runs once at startup
 
+        # loaded here, not in __init__: a server with precomputed text embeddings never needs it
+        text = ort.InferenceSession(self.model_dir / f"{self.name}_text.onnx", providers=["CPUExecutionProvider"])
         tokens = open_clip.get_tokenizer(TOKENIZERS[self.name])(list(texts)).numpy()
         return np.concatenate([
-            self.text.run(None, {"tokens": tokens[i : i + self.batch_size]})[0]
+            text.run(None, {"tokens": tokens[i : i + self.batch_size]})[0]
             for i in range(0, len(tokens), self.batch_size)
         ])

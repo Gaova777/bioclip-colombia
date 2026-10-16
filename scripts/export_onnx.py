@@ -1,14 +1,18 @@
-"""Export a model's image and text encoders to ONNX, plus an INT8 version of the image encoder.
+"""Export a model's image and text encoders to ONNX, plus an INT8 version of the image encoder,
+and the candidates' text embeddings (so a CPU server like the Lambda needs neither torch nor the text encoder).
 
 usage: uv run --group onnx scripts/export_onnx.py bioclip
 """
 import argparse
 from pathlib import Path
 
+import numpy as np
 import torch
 from onnxruntime.quantization import QuantType, quantize_dynamic
 
+from bioclip_co.adapters.candidates_csv import read_candidates
 from bioclip_co.adapters.openclip_encoder import OpenClipEncoder
+from bioclip_co.application.zero_shot import prompts_for
 
 
 class ImageTower(torch.nn.Module):
@@ -50,6 +54,8 @@ def main(args):
     image = args.out / f"{args.model}_image.onnx"
     quantize_dynamic(image, image.with_name(image.stem + "_int8.onnx"), weight_type=QuantType.QInt8)
     (args.out / f"{args.model}_logit_scale.txt").write_text(f"{encoder.logit_scale}\n")
+    texts = encoder.encode_texts(prompts_for(read_candidates(args.candidates), style=args.model))
+    np.save(args.out / f"{args.model}_text_emb.npy", texts)
     for f in sorted(args.out.glob(f"{args.model}_*")):
         print(f"{f.name:32} {f.stat().st_size / 1e6:7.1f} MB")
 
@@ -57,5 +63,6 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("model", choices=["clip", "bioclip"])
+    parser.add_argument("--candidates", type=Path, default=Path("data/candidates/aves_colombia.csv"))
     parser.add_argument("--out", type=Path, default=Path("models"))
     main(parser.parse_args())

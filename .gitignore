@@ -25,3 +25,5 @@ models/
 mlflow.db
 mlruns/
 mlartifacts/
+events/
+.aws-sam/

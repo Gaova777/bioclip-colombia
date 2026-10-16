@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: bioclip-colombia classifier as a Lambda behind an HTTP API (ONNX on CPU)
+
+Resources:
+  ClassifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Architectures: [x86_64]
+      MemorySize: 3008
+      Timeout: 30
+      Environment:
+        Variables:
+          INT8: "0"  # "1" for the 4x smaller image encoder, 4.5 points less accurate (results/serving)
+      Events:
+        Classify:
+          Type: HttpApi
+          Properties:
+            Path: /classify
+            Method: post
+    Metadata:
+      Dockerfile: lambda.Dockerfile
+      DockerContext: .
+      DockerTag: latest
+
+Outputs:
+  ClassifyUrl:
+    Description: POST a photo here
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/classify"
