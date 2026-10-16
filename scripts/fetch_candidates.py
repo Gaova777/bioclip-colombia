@@ -30,8 +30,8 @@ def get(endpoint, retries=4, **params):
                 raise
 
 
-def find_taxon_id(name):
-    for taxon in get("taxa", q=name)["results"]:
+def find_taxon_id(name, **filters):
+    for taxon in get("taxa", q=name, **filters)["results"]:
         if taxon["name"] == name:
             return taxon["id"]
     raise SystemExit(f"taxon not found on iNaturalist: {name}")

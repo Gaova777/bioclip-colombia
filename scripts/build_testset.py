@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fetch_candidates import COLOMBIA, get  # noqa: E402
+from fetch_candidates import COLOMBIA, find_taxon_id, get  # noqa: E402
 
 LICENSES = "cc0,cc-by,cc-by-nc,cc-by-sa,cc-by-nc-sa"
 SINCE = "2024-01-01"
@@ -22,12 +22,14 @@ FIELDS = ["path", "genus", "species", "observation", "observed_on", "license", "
 
 
 def observations(scientific_name, k):
+    # taxon_name can resolve to the genus: "Tyrannus tyrannus" gave only other Tyrannus species.
+    # The id is exact, and it still includes subspecies.
+    taxon_id = find_taxon_id(scientific_name, rank="species")
     return get(
         "observations",
-        taxon_name=scientific_name, place_id=COLOMBIA, quality_grade="research",
+        taxon_id=taxon_id, place_id=COLOMBIA, quality_grade="research",
         photo_license=LICENSES, d1=SINCE, per_page=k,
     )["results"]
-
 
 
 def download(url, dest):
@@ -46,8 +48,7 @@ def main(candidates, k, out_dir):
     rows, jobs = [], []
     for i, sp in enumerate(species, 1):
         name = f"{sp['genus']} {sp['species']}"
-        # keep subspecies (e.g. "Amazilia tzacatl jucunda"), drop anything else the search matched
-        obs = [o for o in observations(name, k) if f"{o['taxon']['name']} ".startswith(f"{name} ")]
+        obs = observations(name, k)
         for o in obs:
             photo = o["photos"][0]
             dest = out_dir / "images" / f"{sp['genus']}_{sp['species']}_{o['id']}.jpg"
