@@ -10,6 +10,8 @@ pipeline {
 
     environment {
         PATH = "${env.HOME}/.local/bin:${env.PATH}"
+        // parameters only exist after the first run reads this file
+        MODEL = "${params.MODEL ?: 'bioclip'}"
     }
 
     stages {
