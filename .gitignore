@@ -13,5 +13,8 @@ wheels/
 data/*
 !data/samples/
 !data/candidates/
+!data/testset/
+data/testset/images/
 *.onnx
 .ipynb_checkpoints/
+*.log

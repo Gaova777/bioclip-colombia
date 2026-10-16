@@ -1,29 +1,11 @@
 import argparse
-
-import open_clip
-import torch
-from PIL import Image
+from pathlib import Path
 
 from bioclip_co.adapters.candidates_csv import read_candidates
+from bioclip_co.adapters.openclip_encoder import OpenClipEncoder
+from bioclip_co.application.zero_shot import prompts_for, species_probabilities
 from bioclip_co.domain.abstention import descend
 from bioclip_co.domain.taxonomy import marginalize
-
-
-def load(name, pretrained=None):
-    model, _, preprocess = open_clip.create_model_and_transforms(name, pretrained=pretrained)
-    tokenizer = open_clip.get_tokenizer(name)
-    return model.eval(), preprocess, tokenizer
-
-
-@torch.no_grad()
-def classify(model, preprocess, tokenizer, image_path, prompts):
-    image = preprocess(Image.open(image_path).convert("RGB")).unsqueeze(0)
-    img = model.encode_image(image)
-    txt = model.encode_text(tokenizer(prompts))
-    img = img / img.norm(dim=-1, keepdim=True)
-    txt = txt / txt.norm(dim=-1, keepdim=True)
-    logits = model.logit_scale.exp() * img @ txt.T
-    return logits.softmax(dim=-1)[0].tolist()
 
 
 def show_top(title, ranking, n):
@@ -34,27 +16,22 @@ def show_top(title, ranking, n):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("image")
+    parser.add_argument("image", type=Path)
     parser.add_argument("--candidates", default="data/candidates/trochilidae_colombia.csv")
     # 0.8 is a first guess; it should be tuned on a validation set later
     parser.add_argument("--threshold", type=float, default=0.8)
     args = parser.parse_args()
 
-    image_path = args.image
     taxa = read_candidates(args.candidates)
-
-    clip_prompts = [f"a photo of a {t.common_name}" for t in taxa]
-    bio_prompts = [f"a photo of {t.taxonomic_name} with common name {t.common_name}" for t in taxa]
-
-    runs = [
-        ("CLIP (OpenAI)", "ViT-B-16", "openai", clip_prompts),
-        ("BioCLIP", "hf-hub:imageomics/bioclip", None, bio_prompts),
-    ]
     print(f"{len(taxa)} candidates")
-    for label, name, pretrained, prompts in runs:
-        model, preprocess, tokenizer = load(name, pretrained)
-        probs = classify(model, preprocess, tokenizer, image_path, prompts)
-        print(f"\n== {label} ==")
+
+    for model_name in ["clip", "bioclip"]:
+        encoder = OpenClipEncoder(model_name)
+        image = encoder.encode_images([args.image])
+        texts = encoder.encode_texts(prompts_for(taxa, style=model_name))
+        probs = species_probabilities(image, texts, encoder.logit_scale)[0].tolist()
+
+        print(f"\n== {model_name} ==")
         species = {f"{t.common_name} ({t.scientific_name})": p for t, p in zip(taxa, probs)}
         show_top("species", dict(sorted(species.items(), key=lambda x: -x[1])), 5)
         genus = {prefix[-1]: p for prefix, p in marginalize(taxa, probs, "genus").items()}
