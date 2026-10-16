@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from bioclip_co.application.field_guide import build_field_guide
 from bioclip_co.domain.taxonomy import Taxon
 from bioclip_co.entrypoints.api import Classifier, create_app
 
@@ -29,10 +30,38 @@ class FakeEncoder:
         return img / np.linalg.norm(img)
 
 
+class FakeWriter:
+    def question(self, candidates, notes, already_asked):
+        return "Is the tail rufous?"
+
+    def fits(self, candidate, note, question, answer):
+        return candidate["name"] == "Amazilia tzacatl" if answer == "yes" else None
+
+    def card(self, name, common, notes):
+        return f"about {name}"
+
+
+class NoRecords:
+    def records_in(self, name, region):
+        return 0
+
+    def red_list(self, name):
+        return None
+
+
+class Notes:
+    def summary(self, name):
+        return {"title": name, "extract": "notes", "url": "https://example.org"}
+
+
+def load(threshold=0.7):
+    guide = build_field_guide(TAXA, threshold, NoRecords(), Notes(), FakeWriter())
+    return {"taxa": TAXA, "models": {"bioclip": Classifier(FakeEncoder(), TAXA)}, "threshold": threshold, "guide": guide}
+
+
 @pytest.fixture
 def client():
-    app = create_app(load=lambda: {"taxa": TAXA, "models": {"bioclip": Classifier(FakeEncoder(), TAXA)}, "threshold": 0.7})
-    with TestClient(app) as c:
+    with TestClient(create_app(load=load)) as c:
         yield c
 
 
@@ -64,4 +93,20 @@ def test_classify_rejects_files_that_are_not_images(client):
 
 def test_candidates_and_health(client):
     assert len(client.get("/candidates").json()) == 3
-    assert client.get("/health").json() == {"status": "ok", "models": ["bioclip"], "threshold": 0.7}
+    assert client.get("/health").json() == {"status": "ok", "models": ["bioclip"], "threshold": 0.7, "agent": True}
+
+
+def test_the_agent_asks_then_answers():
+    # the fake image is 94% the first candidate: at a 0.99 threshold it stops at the genus (99.1%)
+    with TestClient(create_app(load=lambda: load(threshold=0.99))) as client:
+        start = client.post("/agent/start", files={"file": ("bird.png", png())}).json()
+        assert start["status"] == "question"
+        assert start["question"] == "Is the tail rufous?"
+
+        done = client.post("/agent/answer", json={"thread_id": start["thread_id"], "answer": "yes"}).json()
+        assert done["status"] == "done"
+        assert done["card"]["name"] == "Amazilia tzacatl"
+
+
+def test_answering_a_thread_that_isnt_waiting(client):
+    assert client.post("/agent/answer", json={"thread_id": "nope", "answer": "yes"}).status_code == 404
