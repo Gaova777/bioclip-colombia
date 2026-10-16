@@ -1,3 +1,5 @@
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 RANKS = ("kingdom", "phylum", "class", "order", "family", "genus", "species")
@@ -30,3 +32,18 @@ class Taxon:
     def taxonomic_name(self) -> str:
         """The flattened string BioCLIP was trained on (paper, section 3.2)."""
         return " ".join(self.lineage)
+
+
+def marginalize(taxa: Sequence[Taxon], probs: Sequence[float], rank: str) -> dict[tuple[str, ...], float]:
+    """Turn species probabilities into probabilities at a higher rank.
+
+    P(genus) is the sum of its species, P(family) the sum of its genera, and so on.
+    The result is sorted from most to least likely.
+    """
+    if len(taxa) != len(probs):
+        raise ValueError(f"{len(taxa)} taxa but {len(probs)} probabilities")
+
+    totals: dict[tuple[str, ...], float] = defaultdict(float)
+    for taxon, p in zip(taxa, probs):
+        totals[taxon.prefix(rank)] += p
+    return dict(sorted(totals.items(), key=lambda item: -item[1]))
