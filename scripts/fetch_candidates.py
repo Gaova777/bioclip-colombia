@@ -1,10 +1,12 @@
-"""Download the most observed species of a family in Colombia from iNaturalist.
+"""Download the most observed species of one or more taxa in Colombia from iNaturalist.
 
-usage: uv run scripts/fetch_candidates.py Trochilidae 30
+usage:
+    uv run scripts/fetch_candidates.py Trochilidae -n 30
+    uv run scripts/fetch_candidates.py Aves Trochilidae -n 150 -o data/candidates/aves_colombia.csv
 """
+import argparse
 import csv
 import json
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -16,11 +18,11 @@ COLOMBIA = 7196
 RANKS = ["kingdom", "phylum", "class", "order", "family", "genus"]
 
 
-def get(endpoint, retries=3, **params):
+def get(endpoint, retries=4, **params):
     url = f"{API}/{endpoint}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"User-Agent": "bioclip-colombia"})
     for attempt in range(retries):
-        time.sleep(1)  # iNaturalist asks for ~1 request per second
+        time.sleep(1 + 2**attempt - 1)  # iNaturalist asks for ~1 request per second
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.load(resp)
@@ -29,32 +31,57 @@ def get(endpoint, retries=3, **params):
                 raise
 
 
-def family_lineage(taxon_id):
-    taxon = get(f"taxa/{taxon_id}")["results"][0]
-    ranks = {a["rank"]: a["name"] for a in taxon["ancestors"]}
-    return [ranks[r] for r in RANKS[:-2]] + [taxon["name"]]
+def find_taxon_id(name):
+    for taxon in get("taxa", q=name)["results"]:
+        if taxon["name"] == name:
+            return taxon["id"]
+    raise SystemExit(f"taxon not found on iNaturalist: {name}")
 
 
-def main(family, n):
-    family_id = get("taxa", q=family, rank="family")["results"][0]["id"]
-    above_genus = family_lineage(family_id)
-    counts = get(
+def top_species(taxon_id, n):
+    return get(
         "observations/species_counts",
-        taxon_id=family_id, place_id=COLOMBIA, quality_grade="research",
+        taxon_id=taxon_id, place_id=COLOMBIA, quality_grade="research",
         per_page=n, locale="en",
     )["results"]
 
-    out = Path(f"data/candidates/{family.lower()}_colombia.csv")
+
+def ancestor_names(ids):
+    """Map taxon id -> (rank, name), asking the API for 30 ids at a time."""
+    ids = sorted(ids)
+    names = {}
+    for i in range(0, len(ids), 30):
+        batch = ",".join(map(str, ids[i : i + 30]))
+        for t in get(f"taxa/{batch}")["results"]:
+            names[t["id"]] = (t["rank"], t["name"])
+    return names
+
+
+def main(taxa, n, out):
+    rows = {}
+    for name in taxa:
+        for row in top_species(find_taxon_id(name), n):
+            rows.setdefault(row["taxon"]["id"], row)
+
+    names = ancestor_names({a for r in rows.values() for a in r["taxon"]["ancestor_ids"]})
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(RANKS + ["species", "common_name", "observations"])
-        for row in counts:
+        for row in sorted(rows.values(), key=lambda r: -r["count"]):
             t = row["taxon"]
-            genus, epithet = t["name"].split()[:2]
-            writer.writerow(above_genus + [genus, epithet, t.get("preferred_common_name", ""), row["count"]])
-    print(f"{len(counts)} species -> {out}")
+            lineage = dict(names[a] for a in t["ancestor_ids"] if a in names)
+            epithet = t["name"].split()[1]
+            writer.writerow([lineage[r] for r in RANKS] + [epithet, t.get("preferred_common_name", ""), row["count"]])
+    print(f"{len(rows)} species -> {out}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 30)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("taxa", nargs="+", help="taxon names, e.g. Aves or Trochilidae")
+    parser.add_argument("-n", type=int, default=30, help="species per taxon")
+    parser.add_argument("-o", "--out", type=Path)
+    args = parser.parse_args()
+    out = args.out or Path(f"data/candidates/{args.taxa[0].lower()}_colombia.csv")
+    main(args.taxa, args.n, out)
