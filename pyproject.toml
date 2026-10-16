@@ -36,6 +36,9 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
+mlops = [
+    "mlflow>=3.17.1",
+]
 onnx = [
     "onnx>=1.23.2",
     "onnxruntime>=1.31.0",

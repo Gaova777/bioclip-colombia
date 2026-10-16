@@ -22,3 +22,6 @@ data/valset/images/
 .ipynb_checkpoints/
 *.log
 models/
+mlflow.db
+mlruns/
+mlartifacts/

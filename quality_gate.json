@@ -1,0 +1,5 @@
+{
+  "species_accuracy": {"min": 0.75},
+  "species_coverage_at_threshold": {"min": 0.60},
+  "any_error_at_threshold": {"max": 0.05}
+}
