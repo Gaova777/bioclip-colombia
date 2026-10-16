@@ -1,0 +1,7 @@
+.git
+.venv
+web
+data/testset
+data/cache
+results
+tests
