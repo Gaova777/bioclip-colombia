@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { candidates, classify, health } from './api'
+import { FieldGuide } from './FieldGuide'
 import { ModelPanel } from './ModelPanel'
 import type { Classification } from './tree'
 
@@ -28,6 +29,8 @@ const sampleUrl = (file: string) => `${import.meta.env.BASE_URL}samples/${file}`
 export default function App() {
   const [photo, setPhoto] = useState(sampleUrl(SAMPLES[0].file))
   const [result, setResult] = useState<Classification>()
+  const [image, setImage] = useState<Blob>()
+  const [agent, setAgent] = useState(false)
   const [threshold, setThreshold] = useState(0.8)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -37,7 +40,10 @@ export default function App() {
   useEffect(() => {
     // the default threshold is the one picked on the validation set (scripts/calibrate.py)
     health()
-      .then((h) => setThreshold(h.threshold))
+      .then((h) => {
+        setThreshold(h.threshold)
+        setAgent(h.agent)
+      })
       .catch(() => {})
     candidates()
       .then((list) => setCommonNames(new Map(list.map((c) => [c.lineage.slice(-2).join(' '), c.common_name]))))
@@ -46,6 +52,7 @@ export default function App() {
 
   async function run(image: Blob, url: string) {
     setPhoto(url)
+    setImage(image)
     setResult(undefined)
     setError(undefined)
     setLoading(true)
@@ -163,6 +170,9 @@ export default function App() {
             />
           </section>
         )}
+
+        {/* key: a new photo starts a new conversation */}
+        {result && agent && image && <FieldGuide key={photo} image={image} />}
       </main>
 
       <footer>
