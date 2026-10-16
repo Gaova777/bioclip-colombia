@@ -4,18 +4,19 @@ import { ModelPanel } from './ModelPanel'
 import type { Classification } from './tree'
 
 const SAMPLES = [
-  { file: 'amazilia_tzacatl_yarumal.jpg', label: 'Rufous-tailed hummingbird', credit: 'Esteban Villa Restrepo, CC BY' },
-  { file: 'saucerottia_saucerottei_anori.jpg', label: 'Steely-vented hummingbird', credit: 'Christoph Moning, CC BY' },
-  { file: 'uranomitra_franciae_cali.jpg', label: 'Andean emerald', credit: 'Anthony Batista, CC BY' },
+  { file: 'amazilia_tzacatl_yarumal.jpg', label: 'Rufous-tailed hummingbird', place: 'Yarumal', credit: 'Esteban Villa Restrepo, CC BY' },
+  { file: 'saucerottia_saucerottei_anori.jpg', label: 'Steely-vented hummingbird', place: 'Anorí', credit: 'Christoph Moning, CC BY' },
+  { file: 'uranomitra_franciae_cali.jpg', label: 'Andean emerald', place: 'Cali', credit: 'Anthony Batista, CC BY' },
 ]
 const sampleUrl = (file: string) => `${import.meta.env.BASE_URL}samples/${file}`
 
 export default function App() {
-  const [preview, setPreview] = useState<string>()
+  const [photo, setPhoto] = useState(sampleUrl(SAMPLES[0].file))
   const [result, setResult] = useState<Classification>()
   const [threshold, setThreshold] = useState(0.8)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
+  const [dragging, setDragging] = useState(false)
   const [commonNames, setCommonNames] = useState(new Map<string, string>())
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export default function App() {
   }, [])
 
   async function run(image: Blob, url: string) {
-    setPreview(url)
+    setPhoto(url)
     setResult(undefined)
     setError(undefined)
     setLoading(true)
@@ -43,89 +44,109 @@ export default function App() {
     run(blob, sampleUrl(file))
   }
 
+  function runFile(file?: File) {
+    if (file) run(file, URL.createObjectURL(file))
+  }
+
   return (
-    <main>
-      <header className="hero">
-        <h1>bioclip-colombia</h1>
-        <p>
-          A species classifier that knows when to say <em>"I'm not sure"</em>. Upload a bird photo: both models
-          walk down the tree of life and stop at the first rank where they are less confident than the threshold.
-        </p>
+    <>
+      <header className="cover" style={{ backgroundImage: `url(${photo})` }}>
+        <div className="cover-text">
+          <p className="eyebrow">Aves de Colombia · 200 species</p>
+          <h1>Which bird is this, and how sure are we?</h1>
+          <p>
+            BioCLIP and CLIP walk down the tree of life, order, family, genus, species, and stop at the
+            first rank where they are less sure than the threshold. A genus you can trust beats a species that's a guess.
+          </p>
+        </div>
       </header>
 
-      <section className="input">
-        <div className="photo">
-          {preview ? <img src={preview} alt="photo to classify" /> : <div className="placeholder">No photo yet</div>}
-        </div>
-        <div className="controls">
-          <label className="upload">
-            Upload a photo
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) run(file, URL.createObjectURL(file))
-              }}
-            />
+      <main>
+        <section className="field">
+          <label
+            className={dragging ? 'drop dragging' : 'drop'}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragging(true)
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragging(false)
+              runFile(e.dataTransfer.files[0])
+            }}
+          >
+            <span className="drop-title">Drop a bird photo here</span>
+            <span className="button">Choose a photo</span>
+            <input type="file" accept="image/*" onChange={(e) => runFile(e.target.files?.[0])} />
           </label>
-          <p className="or">or try one of these</p>
+
           <div className="samples">
+            <p className="eyebrow">or one from iNaturalist</p>
             {SAMPLES.map((s) => (
-              <button key={s.file} onClick={() => runSample(s.file)} title={`Photo: ${s.credit}`}>
+              <button key={s.file} onClick={() => runSample(s.file)}>
                 <img src={sampleUrl(s.file)} alt={s.label} />
-                <span>{s.label}</span>
+                <span>
+                  {s.label}
+                  <small>{s.place}</small>
+                </span>
               </button>
             ))}
           </div>
+        </section>
 
-          <label className="threshold">
-            <span>
-              Threshold <strong>{Math.round(threshold * 100)}%</strong>
-            </span>
-            <input
-              type="range"
-              min={0.05}
-              max={0.99}
-              step={0.01}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            />
-            <small>Higher means the model answers less deep but is wrong less often.</small>
+        <section className="threshold">
+          <label htmlFor="threshold">
+            Threshold <span className="mono">{Math.round(threshold * 100)}%</span>
           </label>
-        </div>
-      </section>
-
-      {loading && <p className="status">Classifying…</p>}
-      {error && <p className="status error">{error}</p>}
-
-      {result && (
-        <div className="panels">
-          <ModelPanel
-            title="CLIP"
-            subtitle="General-purpose model, prompted with common names"
-            nodes={result.clip}
-            threshold={threshold}
-            commonNames={commonNames}
-            variant="clip"
+          <input
+            id="threshold"
+            type="range"
+            min={0.05}
+            max={0.99}
+            step={0.01}
+            value={threshold}
+            onChange={(e) => setThreshold(Number(e.target.value))}
           />
-          <ModelPanel
-            title="BioCLIP"
-            subtitle="Trained on the tree of life, prompted with the full taxonomy"
-            nodes={result.bioclip}
-            threshold={threshold}
-            commonNames={commonNames}
-            variant="bioclip"
-          />
-        </div>
-      )}
+          <p>Move it up and the answers get shorter but are wrong less often.</p>
+        </section>
+
+        {loading && <p className="status">Looking at the photo…</p>}
+        {error && <p className="status error">{error}</p>}
+        {!result && !loading && !error && <p className="status">Pick a photo to see what each model says.</p>}
+
+        {result && (
+          <section className="results">
+            <ModelPanel
+              model="BioCLIP"
+              about="trained on the tree of life"
+              nodes={result.bioclip}
+              threshold={threshold}
+              commonNames={commonNames}
+              variant="bioclip"
+            />
+            <ModelPanel
+              model="CLIP"
+              about="general purpose"
+              nodes={result.clip}
+              threshold={threshold}
+              commonNames={commonNames}
+              variant="clip"
+            />
+          </section>
+        )}
+      </main>
 
       <footer>
-        Candidates: the 200 most observed bird species in Colombia on iNaturalist. Models: BioCLIP (Stevens et al.,
-        CVPR 2024) and OpenAI CLIP ViT-B/16 through OpenCLIP. Sample photos from iNaturalist:{' '}
-        {SAMPLES.map((s) => s.credit).join('; ')}.{' '}
-        <a href="https://github.com/Gaova777/bioclip-colombia">Code on GitHub</a>
+        <p>
+          Candidates: the 200 most observed bird species in Colombia on iNaturalist. Models: BioCLIP (Stevens et al.,
+          CVPR 2024) and OpenAI CLIP ViT-B/16, through OpenCLIP, zero-shot.
+        </p>
+        <p>Photos from iNaturalist: {SAMPLES.map((s) => s.credit).join(' · ')}.</p>
+        <p>
+          <a href="https://github.com/Gaova777/bioclip-colombia">Code on GitHub</a>
+        </p>
       </footer>
-    </main>
+    </>
   )
 }

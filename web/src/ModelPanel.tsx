@@ -1,8 +1,8 @@
 import { displayName, walk, type TreeNode } from './tree'
 
 interface Props {
-  title: string
-  subtitle: string
+  model: string
+  about: string
   nodes: TreeNode[]
   threshold: number
   commonNames: Map<string, string>
@@ -11,57 +11,63 @@ interface Props {
 
 const pct = (p: number) => `${(p * 100).toFixed(1)}%`
 
-export function ModelPanel({ title, subtitle, nodes, threshold, commonNames, variant }: Props) {
+export function ModelPanel({ model, about, nodes, threshold, commonNames, variant }: Props) {
   const steps = walk(nodes, threshold)
   // ranks with a single option (kingdom, phylum and class when every candidate is a bird) say nothing
   const firstChoice = steps.findIndex((s) => s.options.length > 1)
-  const fixed = steps.slice(0, firstChoice)
+  const root = steps[firstChoice - 1].options[0]
   const shown = steps.slice(firstChoice)
 
   const answer = steps.filter((s) => s.trusted).at(-1)!
   const best = answer.options[0]
-  const stoppedEarly = answer.rank !== 'species'
   const common = best.rank === 'species' ? commonNames.get(displayName(best)) : undefined
 
   return (
-    <section className={`panel ${variant}`}>
-      <header>
-        <h2>{title}</h2>
-        <p className="subtitle">{subtitle}</p>
-      </header>
-
-      <div className="answer">
-        <span className="answer-rank">{answer.rank}</span>
-        <span className={best.rank === 'species' ? 'answer-name italic' : 'answer-name'}>{displayName(best)}</span>
-        {common && <span className="answer-common">{common}</span>}
-        <span className="answer-p">{pct(best.p)}</span>
-        {stoppedEarly && <p className="hedge">Not sure below this rank, so it stops here.</p>}
+    <article className={`specimen ${variant}`}>
+      <div className="label">
+        <dl>
+          <dt>Det.</dt>
+          <dd>
+            {model} <span className="about">{about}</span>
+          </dd>
+          <dt>Rank</dt>
+          <dd>{answer.rank}</dd>
+          <dt>Name</dt>
+          <dd>
+            <span className={best.rank === 'species' ? 'sci' : 'taxon'}>{displayName(best)}</span>
+            {common && <span className="common">{common}</span>}
+          </dd>
+          <dt>Conf.</dt>
+          <dd className="mono">{pct(best.p)}</dd>
+        </dl>
+        {answer.rank !== 'species' && <p className="hedge">Not sure past this rank, so it stops here.</p>}
       </div>
 
-      <p className="breadcrumb">{fixed.map((s) => displayName(s.options[0])).join(' › ')}</p>
-
-      <ol className="ladder">
-        {shown.map((step) => (
-          <li key={step.rank} className={step.trusted ? 'trusted' : 'untrusted'}>
-            <span className="rank">{step.rank}</span>
-            <ul>
-              {step.options
-                .filter((o, i) => i === 0 || o.p >= 0.005)
-                .slice(0, 3)
-                .map((o, i) => (
-                  <li key={o.path.join('/')} className={i === 0 ? 'option top' : 'option'}>
-                    <span className={o.rank === 'species' ? 'name italic' : 'name'}>{displayName(o)}</span>
-                    <span className="bar">
-                      <span className="fill" style={{ width: pct(o.p) }} />
-                      {i === 0 && <span className="cut" style={{ left: pct(threshold) }} />}
-                    </span>
-                    <span className="p">{pct(o.p)}</span>
-                  </li>
-                ))}
-            </ul>
-          </li>
-        ))}
-      </ol>
-    </section>
+      <div className="clade">
+        <p className="clade-root">{displayName(root)}</p>
+        <ol>
+          {shown.map((step, depth) => {
+            const [top, ...rest] = step.options
+            const alternatives = rest.filter((o) => o.p >= 0.005).slice(0, 2)
+            return (
+              <li key={step.rank} className={step.trusted ? 'kept' : 'dropped'} style={{ marginLeft: depth * 18 }}>
+                <span className="clade-rank">{step.rank}</span>
+                <span className={top.rank === 'species' ? 'sci' : 'taxon'}>{displayName(top)}</span>
+                <span className="meter">
+                  <span className="meter-fill" style={{ width: pct(top.p) }} />
+                  <span className="meter-cut" style={{ left: pct(threshold) }} />
+                </span>
+                <span className="mono">{pct(top.p)}</span>
+                {alternatives.length > 0 && (
+                  <span className="alternatives">
+                    or {alternatives.map((o) => `${displayName(o)} ${pct(o.p)}`).join(', ')}
+                  </span>
+                )}
+              </li>
+            )
+          })}
+        </ol>
+      </div>
+    </article>
   )
 }
