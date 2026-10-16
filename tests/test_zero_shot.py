@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from bioclip_co.application.calibration import fit_logit_scale, nll
 from bioclip_co.application.zero_shot import prompts_for, species_probabilities
 from bioclip_co.domain.taxonomy import Taxon
 
@@ -35,3 +36,14 @@ def test_temperature_controls_how_sharp_the_answer_is():
 def test_unknown_prompt_style():
     with pytest.raises(ValueError):
         prompts_for([TAXON], "gpt")
+
+
+def test_temperature_scaling_softens_an_overconfident_model():
+    # the same-looking photo is the second species once and the first species once,
+    # so the honest answer is close to 50/50, not the 100/0 a large scale gives
+    images = np.array([[0.6, 0.8], [0.6, 0.8]])
+    texts = np.eye(2)
+    truth = np.array([1, 0])
+    scale = fit_logit_scale(images, texts, truth)
+    assert nll(images, texts, truth, scale) <= nll(images, texts, truth, 100)
+    assert scale < 100

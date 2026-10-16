@@ -1,7 +1,16 @@
 import pytest
 
 from bioclip_co.domain.abstention import Prediction
-from bioclip_co.domain.metrics import is_correct, mistake_depth, rank_accuracy, risk_coverage, shared_ranks
+from bioclip_co.domain.metrics import (
+    OperatingPoint,
+    calibration_error,
+    is_correct,
+    mistake_depth,
+    pick_threshold,
+    rank_accuracy,
+    risk_coverage,
+    shared_ranks,
+)
 from bioclip_co.domain.taxonomy import Taxon
 
 BIRDS = ("Animalia", "Chordata", "Aves")
@@ -57,3 +66,24 @@ def test_a_higher_threshold_trades_coverage_for_fewer_errors():
     assert strict.species_error == 0.0
     assert strict.any_error == 0.0
     assert strict.mean_depth == pytest.approx((7 + 6) / 2)
+
+
+def test_calibration_error_is_zero_when_confidence_matches_accuracy():
+    # four answers at 75% confidence, three of them right
+    assert calibration_error([0.75] * 4, [True, True, True, False]) == pytest.approx(0)
+
+
+def test_calibration_error_catches_overconfidence():
+    # always 99% sure, right only half the time
+    assert calibration_error([0.99] * 4, [True, False, True, False]) == pytest.approx(0.49)
+
+
+def test_pick_threshold_takes_the_most_coverage_within_the_error_budget():
+    points = [
+        OperatingPoint(0.5, species_coverage=0.9, species_error=0.2, any_error=0.18, mean_depth=6.8),
+        OperatingPoint(0.8, species_coverage=0.7, species_error=0.06, any_error=0.05, mean_depth=6.2),
+        OperatingPoint(0.9, species_coverage=0.6, species_error=0.03, any_error=0.03, mean_depth=6.0),
+    ]
+    assert pick_threshold(points, max_error=0.05).threshold == 0.8
+    with pytest.raises(ValueError):
+        pick_threshold(points, max_error=0.01)

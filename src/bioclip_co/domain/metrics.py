@@ -67,3 +67,28 @@ def risk_coverage(
             mean_depth=sum(len(p.path) for p in preds) / len(preds),
         ))
     return points
+
+
+def calibration_error(confidences: Sequence[float], correct: Sequence[bool], bins: int = 10) -> float:
+    """Expected calibration error: how far confidence is from accuracy, averaged over confidence bins.
+
+    0 means that, among answers given with 80% confidence, 80% are right (and so on for every bin).
+    """
+    total = 0.0
+    for b in range(bins):
+        lo, hi = b / bins, (b + 1) / bins
+        idx = [i for i, c in enumerate(confidences) if lo < c <= hi or (b == 0 and c == 0)]
+        if idx:
+            accuracy = sum(correct[i] for i in idx) / len(idx)
+            confidence = sum(confidences[i] for i in idx) / len(idx)
+            total += len(idx) / len(confidences) * abs(accuracy - confidence)
+    return total
+
+
+def pick_threshold(points: Sequence[OperatingPoint], max_error: float) -> OperatingPoint:
+    """The operating point that answers the most photos down to species while keeping
+    the share of wrong answers (at any rank) at or below `max_error`."""
+    allowed = [p for p in points if p.any_error <= max_error]
+    if not allowed:
+        raise ValueError(f"no threshold keeps the error at or below {max_error:.1%}")
+    return max(allowed, key=lambda p: (p.species_coverage, -p.threshold))
