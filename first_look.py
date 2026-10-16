@@ -1,13 +1,12 @@
-import sys
+import argparse
 
 import open_clip
 import torch
 from PIL import Image
 
 from bioclip_co.adapters.candidates_csv import read_candidates
+from bioclip_co.domain.abstention import descend
 from bioclip_co.domain.taxonomy import marginalize
-
-DEFAULT_CANDIDATES = "data/candidates/trochilidae_colombia.csv"
 
 
 def load(name, pretrained=None):
@@ -34,8 +33,15 @@ def show_top(title, ranking, n):
 
 
 if __name__ == "__main__":
-    image_path = sys.argv[1]
-    taxa = read_candidates(sys.argv[2] if len(sys.argv) > 2 else DEFAULT_CANDIDATES)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image")
+    parser.add_argument("--candidates", default="data/candidates/trochilidae_colombia.csv")
+    # 0.8 is a first guess; it should be tuned on a validation set later
+    parser.add_argument("--threshold", type=float, default=0.8)
+    args = parser.parse_args()
+
+    image_path = args.image
+    taxa = read_candidates(args.candidates)
 
     clip_prompts = [f"a photo of a {t.common_name}" for t in taxa]
     bio_prompts = [f"a photo of {t.taxonomic_name} with common name {t.common_name}" for t in taxa]
@@ -53,3 +59,7 @@ if __name__ == "__main__":
         show_top("species", dict(sorted(species.items(), key=lambda x: -x[1])), 5)
         genus = {prefix[-1]: p for prefix, p in marginalize(taxa, probs, "genus").items()}
         show_top("genus", genus, 3)
+
+        pred = descend(taxa, probs, args.threshold)
+        hedge = "" if pred.reached_species else "  <- not sure about the species"
+        print(f"  answer at {args.threshold:.0%}: {pred.rank} {pred.name} ({pred.confidence:.1%}){hedge}")
