@@ -49,15 +49,60 @@ the y axis is how many of those species answers are wrong.
 At τ = 0.8, BioCLIP answers 721 of the 1000 photos down to species. The rest stop at genus (40),
 family (79), order (70) or just "a bird" (90). CLIP reaches species on 42 photos and says only "a bird" on 492.
 
+## Calibration and the threshold, chosen on a separate validation set
+
+The threshold above is just swept over the test set. To pick one honestly I built a **validation set**:
+another 5 photos per species from iNaturalist, also from 2024 on, none of them shared with the test set
+(`build_testset.py --exclude`). On that set only:
+
+1. **Temperature scaling.** Fit the logit scale that best predicts the true species (lowest negative log-likelihood).
+   BioCLIP's goes from 100 to 64, so its probabilities get softer. CLIP's from 100 to 84.
+2. **Pick τ.** The threshold that answers the most photos down to species while keeping wrong answers at or below 5%:
+   **71%** for BioCLIP.
+
+Then, once, on the test set:
+
+| | BioCLIP, original | BioCLIP, calibrated |
+|---|---:|---:|
+| expected calibration error | 0.077 | **0.027** |
+| wrong answers with > 90% confidence | 29 of 222 | **7 of 222** |
+| at τ = 71% (from validation): photos answered down to species | | **65.7%** |
+| at τ = 71%: wrong answers, at any rank | | **4.1%** (target was ≤ 5%) |
+
+([`calibration.csv`](calibration.csv), [`data/calibration.json`](../../data/calibration.json))
+
+What calibration did **not** do: move the risk-coverage curve. The dashed lines in the plot sit on top of the solid ones.
+A temperature changes how confident the probabilities are, not which photos are more confident than others, so the
+same trade-off is available either way. What it changes is the meaning of the number: after calibration,
+"71% sure" is close to right 71% of the time, and the confident mistakes mostly disappear.
+CLIP's numbers barely move (calibration error 0.042 → 0.041); at its own validation threshold it only reaches species on 3.9% of the photos.
+
+## What the image space looks like
+
+![umap](umap_by_order.png)
+
+For each photo, the share of its 10 nearest photos (cosine, full 512-d image embedding) that share its rank:
+
+| | order | family | genus | species |
+|---|---:|---:|---:|---:|
+| CLIP | 61.8% | 36.1% | 14.6% | 11.4% |
+| BioCLIP | 72.0% | 53.7% | 29.0% | 23.7% |
+
+([`embedding_clusters.csv`](embedding_clusters.csv))
+
+Even before any text is involved, BioCLIP's image space puts relatives together about twice as often at genus and species level.
+I first tried the silhouette score by order; it came out near zero for both models (orders are very uneven, half the
+photos are Passeriformes), so it said nothing useful and I replaced it.
+
 ## What I take from it
 
 - **Abstention is only useful if the model knows something.** With BioCLIP, the threshold trades coverage
   for error smoothly: going from τ = none to 0.9 cuts the species error from 22.5% to 4.5% and still answers
   65% of the photos at species level. With CLIP the same trade is useless: to get under 10% error it has to
   give up on 96% of the photos.
-- **BioCLIP is overconfident.** 29 of its 222 wrong species answers come with more than 90% probability,
+- **BioCLIP is overconfident out of the box.** 29 of its 222 wrong species answers come with more than 90% probability,
   and even at τ = 0.99 it still makes mistakes. CLIP has the opposite problem: none of its mistakes are
-  above 90%, but it is rarely above 90% about anything.
+  above 90%, but it is rarely above 90% about anything. Temperature scaling fixes most of BioCLIP's (29 → 7).
 - **Mistakes didn't get milder, there are just fewer of them.** I expected BioCLIP's wrong answers to stay
   closer to the truth in the tree. They barely do: a wrong species shares on average 4.21 of 7 ranks with the
   right one for BioCLIP and 4.04 for CLIP. About a third of BioCLIP's mistakes (71 of 222) already pick
@@ -77,12 +122,11 @@ family (79), order (70) or just "a bird" (90). CLIP reaches species on 42 photos
   different photos (between the two builds, 989 of 993 photos were the same).
 - 5 photos per species is small. A single photo moves a species' accuracy by 20 points, so per-species
   numbers aren't meaningful yet; the totals over 1000 images are.
-- τ is not chosen yet. The table above describes the whole curve; picking τ has to happen on a separate
-  validation split, not on this test set.
+- The validation and test sets come from the same source and period, so they are as similar as two samples can be.
+  Photos from somewhere else (my own phone, another country) could behave differently.
 - Only the first photo of each observation is used, and I haven't checked them by hand.
 
 ## Next
 
-- Split validation / test and pick τ on validation.
-- Calibration: check if a temperature on BioCLIP's logits fixes the overconfidence before thresholding.
-- Look at the 29 confident mistakes one by one.
+- Look at the 7 mistakes that are still confident, one by one.
+- Try my own photos.

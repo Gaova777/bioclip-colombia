@@ -1,0 +1,3 @@
+model,logit_scale_original,logit_scale_calibrated,ece_original,ece_calibrated,test_threshold,test_species_coverage,test_species_error,test_any_error,test_mean_depth
+clip,100.0,84.05826533597941,0.042031263414770356,0.04052222570218146,0.69,0.039,0.07692307692307693,0.052,3.895
+bioclip,100.0,64.06521212667923,0.07667953197658067,0.027229334756732025,0.71,0.657,0.0441400304414003,0.041,6.056
