@@ -27,6 +27,9 @@ packages = ["src/bioclip_co"]
 testpaths = ["tests"]
 
 [dependency-groups]
+analysis = [
+    "umap-learn>=0.5.12",
+]
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
