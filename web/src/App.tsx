@@ -4,9 +4,24 @@ import { ModelPanel } from './ModelPanel'
 import type { Classification } from './tree'
 
 const SAMPLES = [
-  { file: 'amazilia_tzacatl_yarumal.jpg', label: 'Rufous-tailed hummingbird', place: 'Yarumal', credit: 'Esteban Villa Restrepo, CC BY' },
-  { file: 'saucerottia_saucerottei_anori.jpg', label: 'Steely-vented hummingbird', place: 'Anorí', credit: 'Christoph Moning, CC BY' },
-  { file: 'uranomitra_franciae_cali.jpg', label: 'Andean emerald', place: 'Cali', credit: 'Anthony Batista, CC BY' },
+  {
+    file: 'amazilia_tzacatl_yarumal.jpg',
+    label: 'Rufous-tailed hummingbird',
+    place: 'Yarumal',
+    credit: 'Esteban Villa Restrepo, CC BY',
+  },
+  {
+    file: 'saucerottia_saucerottei_anori.jpg',
+    label: 'Steely-vented hummingbird',
+    place: 'Anorí',
+    credit: 'Christoph Moning, CC BY',
+  },
+  {
+    file: 'uranomitra_franciae_cali.jpg',
+    label: 'Andean emerald',
+    place: 'Cali',
+    credit: 'Anthony Batista, CC BY',
+  },
 ]
 const sampleUrl = (file: string) => `${import.meta.env.BASE_URL}samples/${file}`
 
@@ -50,13 +65,17 @@ export default function App() {
 
   return (
     <>
+      <nav className="topbar">
+        <span className="brand">bioclip-colombia</span>
+        <a href="https://github.com/Gaova777/bioclip-colombia">GitHub</a>
+      </nav>
       <header className="cover" style={{ backgroundImage: `url(${photo})` }}>
         <div className="cover-text">
           <p className="eyebrow">Aves de Colombia · 200 species</p>
           <h1>Which bird is this, and how sure are we?</h1>
           <p>
-            BioCLIP and CLIP walk down the tree of life, order, family, genus, species, and stop at the
-            first rank where they are less sure than the threshold. A genus you can trust beats a species that's a guess.
+            BioCLIP and CLIP walk down the tree of life, order, family, genus, species, and stop at the first rank where
+            they are less sure than the threshold. A genus you can trust beats a species that's a guess.
           </p>
         </div>
       </header>
@@ -76,28 +95,33 @@ export default function App() {
               runFile(e.dataTransfer.files[0])
             }}
           >
+            <svg className="drop-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z" />
+            </svg>
             <span className="drop-title">Drop a bird photo here</span>
             <span className="button">Choose a photo</span>
             <input type="file" accept="image/*" onChange={(e) => runFile(e.target.files?.[0])} />
           </label>
 
           <div className="samples">
-            <p className="eyebrow">or one from iNaturalist</p>
-            {SAMPLES.map((s) => (
-              <button key={s.file} onClick={() => runSample(s.file)}>
-                <img src={sampleUrl(s.file)} alt={s.label} />
-                <span>
-                  {s.label}
-                  <small>{s.place}</small>
-                </span>
-              </button>
-            ))}
+            <p className="eyebrow">Or try one from iNaturalist</p>
+            <div className="tiles">
+              {SAMPLES.map((s) => (
+                <button key={s.file} onClick={() => runSample(s.file)}>
+                  <img src={sampleUrl(s.file)} alt={s.label} />
+                  <span>
+                    {s.label}
+                    <small>{s.place}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 
         <section className="threshold">
           <label htmlFor="threshold">
-            Threshold <span className="mono">{Math.round(threshold * 100)}%</span>
+            Threshold <span className="num">{Math.round(threshold * 100)}%</span>
           </label>
           <input
             id="threshold"

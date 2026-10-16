@@ -23,25 +23,17 @@ export function ModelPanel({ model, about, nodes, threshold, commonNames, varian
   const common = best.rank === 'species' ? commonNames.get(displayName(best)) : undefined
 
   return (
-    <article className={`specimen ${variant}`}>
-      <div className="label">
-        <dl>
-          <dt>Det.</dt>
-          <dd>
-            {model} <span className="about">{about}</span>
-          </dd>
-          <dt>Rank</dt>
-          <dd>{answer.rank}</dd>
-          <dt>Name</dt>
-          <dd>
-            <span className={best.rank === 'species' ? 'sci' : 'taxon'}>{displayName(best)}</span>
-            {common && <span className="common">{common}</span>}
-          </dd>
-          <dt>Conf.</dt>
-          <dd className="mono">{pct(best.p)}</dd>
-        </dl>
-        {answer.rank !== 'species' && <p className="hedge">Not sure past this rank, so it stops here.</p>}
-      </div>
+    <article className={`result ${variant}`}>
+      <header className="result-head">
+        <p className="result-model">
+          {model} <span>{about}</span>
+        </p>
+        <p className="result-rank">{answer.rank}</p>
+        <p className={best.rank === 'species' ? 'result-name sci' : 'result-name'}>{displayName(best)}</p>
+        {common && <p className="result-common">{common}</p>}
+        <p className="result-p">{pct(best.p)}</p>
+      </header>
+      {answer.rank !== 'species' && <p className="hedge">Not sure past this rank, so it stops here.</p>}
 
       <div className="clade">
         <p className="clade-root">{displayName(root)}</p>
@@ -50,14 +42,14 @@ export function ModelPanel({ model, about, nodes, threshold, commonNames, varian
             const [top, ...rest] = step.options
             const alternatives = rest.filter((o) => o.p >= 0.005).slice(0, 2)
             return (
-              <li key={step.rank} className={step.trusted ? 'kept' : 'dropped'} style={{ marginLeft: depth * 18 }}>
+              <li key={step.rank} className={step.trusted ? 'kept' : 'dropped'} style={{ marginLeft: depth * 16 }}>
                 <span className="clade-rank">{step.rank}</span>
-                <span className={top.rank === 'species' ? 'sci' : 'taxon'}>{displayName(top)}</span>
+                <span className={top.rank === 'species' ? 'clade-name sci' : 'clade-name'}>{displayName(top)}</span>
                 <span className="meter">
                   <span className="meter-fill" style={{ width: pct(top.p) }} />
                   <span className="meter-cut" style={{ left: pct(threshold) }} />
                 </span>
-                <span className="mono">{pct(top.p)}</span>
+                <span className="num">{pct(top.p)}</span>
                 {alternatives.length > 0 && (
                   <span className="alternatives">
                     or {alternatives.map((o) => `${displayName(o)} ${pct(o.p)}`).join(', ')}
