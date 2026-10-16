@@ -12,5 +12,6 @@ wheels/
 # data / models
 data/*
 !data/samples/
+!data/candidates/
 *.onnx
 .ipynb_checkpoints/
