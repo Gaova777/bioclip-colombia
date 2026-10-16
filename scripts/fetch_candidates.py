@@ -8,7 +8,6 @@ import argparse
 import csv
 import json
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -26,7 +25,7 @@ def get(endpoint, retries=4, **params):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.load(resp)
-        except (urllib.error.URLError, ConnectionError):
+        except OSError:  # covers URLError, dropped connections and timeouts
             if attempt == retries - 1:
                 raise
 
@@ -69,12 +68,17 @@ def main(taxa, n, out):
     with out.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(RANKS + ["species", "common_name", "observations"])
+        written = 0
         for row in sorted(rows.values(), key=lambda r: -r["count"]):
             t = row["taxon"]
             lineage = dict(names[a] for a in t["ancestor_ids"] if a in names)
+            if missing := [r for r in RANKS if r not in lineage]:
+                print(f"skipping {t['name']}: no {', '.join(missing)} in its lineage")
+                continue
             epithet = t["name"].split()[1]
             writer.writerow([lineage[r] for r in RANKS] + [epithet, t.get("preferred_common_name", ""), row["count"]])
-    print(f"{len(rows)} species -> {out}")
+            written += 1
+    print(f"{written} species -> {out}")
 
 
 if __name__ == "__main__":
