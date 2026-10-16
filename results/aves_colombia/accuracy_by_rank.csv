@@ -1,0 +1,3 @@
+model,order,family,genus,species,mean_mistake_depth
+clip,0.78,0.595,0.329,0.291,4.043723554301834
+bioclip,0.931,0.871,0.802,0.778,4.211711711711712
