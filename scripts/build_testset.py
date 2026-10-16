@@ -4,7 +4,9 @@ Only observations from 2024 on are used. BioCLIP's training data (iNat21 and the
 is older, so these photos can't have been seen during training.
 Images stay out of git; the manifest with credits is committed.
 
-usage: uv run scripts/build_testset.py data/candidates/aves_colombia.csv -k 5
+usage:
+    uv run scripts/build_testset.py data/candidates/aves_colombia.csv -k 5
+    uv run scripts/build_testset.py data/candidates/aves_colombia.csv -k 5 -o data/valset --exclude data/testset/manifest.csv
 """
 import argparse
 import csv
@@ -40,15 +42,20 @@ def download(url, dest):
         dest.write_bytes(resp.read())
 
 
-def main(candidates, k, out_dir):
+def main(candidates, k, out_dir, exclude):
     with open(candidates, encoding="utf-8") as f:
         species = list(csv.DictReader(f))
+    # a validation set must not share photos with the test set
+    taken = set()
+    if exclude:
+        with open(exclude, encoding="utf-8") as f:
+            taken = {int(row["observation"]) for row in csv.DictReader(f)}
 
     # 1) metadata from the API, one request per species (rate limited)
     rows, jobs = [], []
     for i, sp in enumerate(species, 1):
         name = f"{sp['genus']} {sp['species']}"
-        obs = observations(name, k)
+        obs = [o for o in observations(name, k + k * bool(taken)) if o["id"] not in taken][:k]
         for o in obs:
             photo = o["photos"][0]
             dest = out_dir / "images" / f"{sp['genus']}_{sp['species']}_{o['id']}.jpg"
@@ -81,5 +88,6 @@ if __name__ == "__main__":
     parser.add_argument("candidates", type=Path)
     parser.add_argument("-k", type=int, default=5, help="photos per species")
     parser.add_argument("-o", "--out", type=Path, default=Path("data/testset"))
+    parser.add_argument("--exclude", type=Path, help="manifest whose photos must not be reused")
     args = parser.parse_args()
-    main(args.candidates, args.k, args.out)
+    main(args.candidates, args.k, args.out, args.exclude)

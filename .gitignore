@@ -14,7 +14,10 @@ data/*
 !data/samples/
 !data/candidates/
 !data/testset/
+!data/valset/
+!data/calibration.json
 data/testset/images/
+data/valset/images/
 *.onnx
 .ipynb_checkpoints/
 *.log
