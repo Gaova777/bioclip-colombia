@@ -1,0 +1,30 @@
+{
+  "max_error": 0.05,
+  "validation_images": 1000,
+  "clip": {
+    "logit_scale": 84.05826533597941,
+    "threshold": 0.69,
+    "validation": {
+      "logit_scale_original": 100.0,
+      "ece_original": 0.05149679066613316,
+      "ece_calibrated": 0.030943306922912604,
+      "species_coverage": 0.041,
+      "species_error": 0.07317073170731707,
+      "any_error": 0.049,
+      "mean_depth": 3.879
+    }
+  },
+  "bioclip": {
+    "logit_scale": 64.06521212667923,
+    "threshold": 0.71,
+    "validation": {
+      "logit_scale_original": 100.0,
+      "ece_original": 0.060183951869606934,
+      "ece_calibrated": 0.048192686162889,
+      "species_coverage": 0.644,
+      "species_error": 0.049689440993788817,
+      "any_error": 0.048,
+      "mean_depth": 6.069
+    }
+  }
+}
