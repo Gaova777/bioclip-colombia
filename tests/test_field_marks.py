@@ -1,6 +1,6 @@
 import pytest
 
-from bioclip_co.domain.field_marks import best_question, question_text, update
+from bioclip_co.domain.field_marks import best_question, consensus, question_text, update
 
 # two violet-crowned hummingbirds and one with a white nape band
 MARKS = {
@@ -47,10 +47,16 @@ def test_cant_tell_changes_nothing():
     assert update(NAMES, [0.4, 0.4, 0.2], MARKS, "tail", "green", "can't tell") == [0.4, 0.4, 0.2]
 
 
-def test_a_no_weighs_less_when_the_female_may_look_different():
-    marks = {"a": {"crown": "violet", "sexes_differ": True}, "b": {"crown": "violet"}, "c": {"crown": "green"}}
-    after = update(["a", "b", "c"], [1 / 3] * 3, marks, "crown", "violet", "no")
-    assert after[0] > after[1]  # a "no" can't rule out a species whose female may lack the violet crown
+def test_consensus_keeps_what_most_photos_agree_on():
+    seen = [
+        {"underparts": "yellow", "crown": "black", "tail": None},
+        {"underparts": "yellow", "crown": "white", "tail": None},
+        {"underparts": "white", "crown": "yellow", "tail": "brown"},
+    ]
+    marks = consensus(seen, min_votes=2)
+    assert marks["underparts"] == "yellow"
+    assert marks["crown"] is None  # three photos, three answers: unknown
+    assert marks["tail"] is None  # seen in only one photo
 
 
 def test_question_text():

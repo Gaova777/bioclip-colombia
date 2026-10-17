@@ -1,41 +1,54 @@
-"""Field marks for every candidate species: a local LLM reads the Wikipedia description and fills in a form
-with a closed vocabulary (crown colour, bill shape...). The result is committed so it can be reviewed and fixed by hand.
+"""Field marks for every candidate species, seen in photos: a local vision-language model looks at the
+validation photos of each species (never the test ones) and fills in a form with a closed vocabulary.
+A mark is kept only if most photos agree. The result is committed so it can be reviewed and fixed by hand.
+
+I first extracted the marks from Wikipedia descriptions with a text model. Many descriptions don't give
+the colours (or there's no article), and the model filled the gaps by guessing, so photos replaced the text.
 
 usage: uv run scripts/field_marks.py   (needs Ollama running)
 """
 import argparse
+import csv
 import json
-import time
+from collections import defaultdict
 from pathlib import Path
 
-from bioclip_co.adapters.candidates_csv import read_candidates
-from bioclip_co.adapters.ollama_writer import OllamaWriter
-from bioclip_co.adapters.wikipedia import Wikipedia
+from bioclip_co.adapters.ollama_vision import OllamaVision
+from bioclip_co.domain.field_marks import consensus
 
 
 def main(args):
-    taxa = read_candidates(args.candidates)
-    done = json.loads(args.out.read_text()) if args.out.exists() else {}
-    wiki, llm = Wikipedia(), OllamaWriter(args.model)
-    for i, t in enumerate(taxa, 1):
-        name = t.scientific_name
-        if done.get(name) is not None:
-            continue
-        time.sleep(1)  # be gentle with the Wikipedia API
-        note = wiki.summary(name, max_chars=3000)
-        if note is None:
-            done[name] = None
-            print(f"[{i}/{len(taxa)}] {name}: no Wikipedia article")
-        else:
-            done[name] = llm.field_marks(name, t.common_name, note["extract"]) | {"source": note["url"]}
-            known = sum(v is not None for k, v in done[name].items() if k not in ("sexes_differ", "source"))
-            print(f"[{i}/{len(taxa)}] {name}: {known}/8 field marks", flush=True)
-        args.out.write_text(json.dumps(done, indent=1, ensure_ascii=False) + "\n")  # resumable
+    with open(args.valset / "manifest.csv", encoding="utf-8") as f:
+        photos = defaultdict(list)
+        for row in csv.DictReader(f):
+            photos[f"{row['genus']} {row['species']}"].append(args.valset / row["path"])
+
+    # every answer is kept, so an interrupted run picks up where it stopped
+    seen = {}
+    if args.seen.exists():
+        seen = {r["photo"]: r["marks"] for r in map(json.loads, args.seen.open())}
+    vision = OllamaVision(args.model)
+    args.seen.parent.mkdir(parents=True, exist_ok=True)
+    result = {}
+    with args.seen.open("a") as log:
+        for i, (species, paths) in enumerate(sorted(photos.items()), 1):
+            for path in paths:
+                if str(path) not in seen:
+                    seen[str(path)] = vision.marks(path)
+                    log.write(json.dumps({"photo": str(path), "marks": seen[str(path)]}) + "\n")
+                    log.flush()
+            votes = [seen[str(p)] for p in paths]
+            result[species] = consensus(votes, min_votes=args.min_votes) | {"photos": len(votes)}
+            known = sum(v is not None for k, v in result[species].items() if k != "photos")
+            print(f"[{i}/{len(photos)}] {species}: {known}/8 marks agreed on by {args.min_votes}+ of {len(votes)} photos", flush=True)
+    args.out.write_text(json.dumps(result, indent=1, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--candidates", type=Path, default=Path("data/candidates/aves_colombia.csv"))
-    parser.add_argument("--model", default="qwen3:4b-instruct")
+    parser.add_argument("--valset", type=Path, default=Path("data/valset"))
+    parser.add_argument("--model", default="qwen3-vl:8b-instruct")
+    parser.add_argument("--min-votes", type=int, default=3)
+    parser.add_argument("--seen", type=Path, default=Path("data/cache/field_marks_seen.jsonl"))
     parser.add_argument("--out", type=Path, default=Path("data/field_marks.json"))
     main(parser.parse_args())

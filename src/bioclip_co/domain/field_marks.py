@@ -1,11 +1,12 @@
 """Choosing the question that best splits the candidates, and updating their probabilities with the answer.
 
-Each species has field marks from a closed vocabulary (data/field_marks.json). A question is
-"is <feature> <value>?". The best one is the one with the largest expected information gain,
+Each species has field marks from a closed vocabulary (data/field_marks.json), agreed on by several
+photos of it (consensus below). A question is "is <feature> <value>?". The best one is the one with the largest expected information gain,
 weighted by the classifier's probabilities, so a feature every candidate shares is never asked.
 Answers update the probabilities with Bayes' rule instead of throwing candidates away.
 """
 import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
 
 COLOR = ["black", "white", "grey", "brown", "rufous", "buff", "yellow", "orange", "red", "pink", "green", "blue", "violet", "olive"]
@@ -33,12 +34,21 @@ PHRASES = {
 # P(answer "yes" | the candidate's field mark says...)
 MATCH = 0.9  # ...the same value
 MISMATCH = 0.1  # ...another value
-UNKNOWN = 0.5  # ...nothing (the description doesn't say)
-# the marks describe the adult male; when the female looks different the photo may be of her,
-# so both a yes and a no say less about that species
-MATCH_IF_SEXES_DIFFER = 0.65
-MISMATCH_IF_SEXES_DIFFER = 0.35
+UNKNOWN = 0.5  # ...nothing (the photos didn't agree, e.g. males and females look different)
 MIN_GAIN = 0.05  # bits; below this a question isn't worth the person's time
+
+
+def consensus(seen: Sequence[Mapping], min_votes: int) -> dict:
+    """One value per feature from several photos of a species: kept only if at least `min_votes` photos agree.
+
+    Photos that disagree (a female, a juvenile, bad light) leave the feature unknown, which is what it should be.
+    """
+    marks = {}
+    for feature in VOCABULARY:
+        votes = Counter(m.get(feature) for m in seen if m.get(feature) is not None)
+        value, count = votes.most_common(1)[0] if votes else (None, 0)
+        marks[feature] = value if count >= min_votes else None
+    return marks
 
 
 def question_text(feature: str, value: str) -> str:
@@ -49,8 +59,6 @@ def p_yes(marks: Mapping | None, feature: str, value: str) -> float:
     mark = (marks or {}).get(feature)
     if mark is None:
         return UNKNOWN
-    if marks.get("sexes_differ"):
-        return MATCH_IF_SEXES_DIFFER if mark == value else MISMATCH_IF_SEXES_DIFFER
     return MATCH if mark == value else MISMATCH
 
 
