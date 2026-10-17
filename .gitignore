@@ -16,6 +16,7 @@ data/*
 !data/testset/
 !data/valset/
 !data/calibration.json
+!data/field_marks.json
 data/testset/images/
 data/valset/images/
 *.onnx

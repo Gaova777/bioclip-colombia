@@ -27,6 +27,7 @@ from bioclip_co.ports.encoder import ImageTextEncoder
 
 CANDIDATES = os.environ.get("CANDIDATES", "data/candidates/aves_colombia.csv")
 CALIBRATION = Path(os.environ.get("CALIBRATION", "data/calibration.json"))  # made by scripts/calibrate.py
+FIELD_MARKS = Path(os.environ.get("FIELD_MARKS", "data/field_marks.json"))  # made by scripts/field_marks.py
 DEFAULT_THRESHOLD = 0.8
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -79,7 +80,9 @@ def load_field_guide(taxa, threshold):
     from bioclip_co.adapters.wikipedia import Wikipedia
     from bioclip_co.application.field_guide import build_field_guide
 
-    return build_field_guide(taxa, threshold, Gbif(), Wikipedia(), OllamaWriter(OLLAMA_MODEL, OLLAMA_URL))
+    marks = json.loads(FIELD_MARKS.read_text()) if FIELD_MARKS.exists() else {}
+    marks = {name: m for name, m in marks.items() if m}  # species without a Wikipedia description have none
+    return build_field_guide(taxa, threshold, Gbif(), Wikipedia(), OllamaWriter(OLLAMA_MODEL, OLLAMA_URL), marks)
 
 
 class Answer(BaseModel):

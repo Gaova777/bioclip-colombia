@@ -31,14 +31,11 @@ class FakeEncoder:
 
 
 class FakeWriter:
-    def question(self, candidates, notes, already_asked):
-        return "Is the tail rufous?"
-
-    def fits(self, candidate, note, question, answer):
-        return candidate["name"] == "Amazilia tzacatl" if answer == "yes" else None
-
     def card(self, name, common, notes):
         return f"about {name}"
+
+
+MARKS = {"Amazilia tzacatl": {"tail": "rufous"}, "Amazilia amazilia": {"tail": "green"}}
 
 
 class NoRecords:
@@ -55,7 +52,7 @@ class Notes:
 
 
 def load(threshold=0.7):
-    guide = build_field_guide(TAXA, threshold, NoRecords(), Notes(), FakeWriter())
+    guide = build_field_guide(TAXA, threshold, NoRecords(), Notes(), FakeWriter(), MARKS)
     return {"taxa": TAXA, "models": {"bioclip": Classifier(FakeEncoder(), TAXA)}, "threshold": threshold, "guide": guide}
 
 
@@ -101,9 +98,10 @@ def test_the_agent_asks_then_answers():
     with TestClient(create_app(load=lambda: load(threshold=0.99))) as client:
         start = client.post("/agent/start", files={"file": ("bird.png", png())}).json()
         assert start["status"] == "question"
-        assert start["question"] == "Is the tail rufous?"
+        assert start["question"] in ("Is the tail mostly rufous?", "Is the tail mostly green?")
 
-        done = client.post("/agent/answer", json={"thread_id": start["thread_id"], "answer": "yes"}).json()
+        answer = "yes" if "rufous" in start["question"] else "no"
+        done = client.post("/agent/answer", json={"thread_id": start["thread_id"], "answer": answer}).json()
         assert done["status"] == "done"
         assert done["card"]["name"] == "Amazilia tzacatl"
 

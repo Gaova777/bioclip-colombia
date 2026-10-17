@@ -30,19 +30,7 @@ class Candidate(TypedDict):
 
 
 class FieldGuideWriter(Protocol):
-    """The language model. It never names a species on its own: it only works with the candidates it's given."""
-
-    def question(self, candidates: list[Candidate], notes: dict[str, str], already_asked: list[str]) -> str:
-        """One new yes/no question about something visible that tells the candidates apart."""
-        ...
-
-    def fits(self, candidate: Candidate, note: str, question: str, answer: str) -> bool | None:
-        """Does the answer agree with this one candidate's notes? None if the notes don't say.
-
-        One candidate at a time on purpose: a small model asked to pick among three
-        sometimes picked the one the answer had just ruled out.
-        """
-        ...
+    """The language model. It never chooses a species: it only writes about the one it's given."""
 
     def card(self, name: str, common: str, notes: str) -> str:
         """A short field-guide card, using only the notes."""

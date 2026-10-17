@@ -9,6 +9,11 @@ TAXA = [
     Taxon(HUMMINGBIRDS + ("Colibri", "cyanotus"), "lesser violetear"),
     Taxon(HUMMINGBIRDS + ("Colibri", "delphinae"), "brown violetear"),
 ]
+MARKS = {
+    "Colibri coruscans": {"underparts": "blue", "back": "green"},
+    "Colibri cyanotus": {"underparts": "green", "back": "green"},
+    "Colibri delphinae": {"underparts": "brown", "back": "brown"},
+}
 
 
 class FakeOccurrences:
@@ -28,75 +33,60 @@ class FakeEncyclopedia:
 
 
 class FakeWriter:
-    def __init__(self):
-        self.calls = []
-
-    def question(self, candidates, notes, already_asked):
-        self.calls.append("question")
-        return "Is the tail long?" if already_asked else "Is the belly blue?"
-
-    def fits(self, candidate, note, question, answer):
-        self.calls.append(f"fits {candidate['name']}")
-        if answer == "yes":  # "yes, the belly is blue": only the sparkling violetear has one
-            return candidate["name"] == "Colibri coruscans"
-        if answer == "no":
-            return False if candidate["name"] == "Colibri coruscans" else None
-        return None
-
     def card(self, name, common, notes):
         return f"card for {name} from {notes}"
 
 
-def run(probs, region=None, records=None, writer=None):
-    writer = writer or FakeWriter()
-    guide = build_field_guide(TAXA, 0.8, FakeOccurrences(records or {}), FakeEncyclopedia(), writer)
+def run(probs, region=None, records=None, marks=MARKS):
+    guide = build_field_guide(TAXA, 0.8, FakeOccurrences(records or {}), FakeEncyclopedia(), FakeWriter(), marks)
     config = {"configurable": {"thread_id": "test"}}
-    return guide, config, guide.invoke({"probs": probs, "region": region}, config), writer
+    return guide, config, guide.invoke({"probs": probs, "region": region}, config)
 
 
 def test_a_sure_classifier_goes_straight_to_the_card():
-    _, _, result, writer = run([0.9, 0.05, 0.05])
+    _, _, result = run([0.9, 0.05, 0.05])
     assert result["card"]["name"] == "Colibri coruscans"
     assert result["card"]["text"] == "card for Colibri coruscans from notes about Colibri coruscans"
-    assert writer.calls == []  # no question needed
 
 
 def test_the_region_can_settle_it_without_asking():
     # unsure between two violetears, but only one has been recorded in that department
-    _, _, result, writer = run([0.5, 0.45, 0.05], region="Amazonas", records={"Colibri cyanotus": 12})
+    _, _, result = run([0.5, 0.45, 0.05], region="Amazonas", records={"Colibri cyanotus": 12})
     assert result["card"]["name"] == "Colibri cyanotus"
-    assert writer.calls == []
     assert "GBIF: 1 of 3 candidates recorded in Amazonas" in result["trace"]
 
 
-def test_it_asks_and_waits_for_the_answer():
-    guide, config, result, writer = run([0.5, 0.45, 0.05])
-    assert result["__interrupt__"][0].value["question"] == "Is the belly blue?"
-    assert "card" not in result
+def test_it_asks_about_what_separates_the_likely_candidates():
+    _, _, result = run([0.5, 0.45, 0.05])
+    # the back is green for both likely ones, so it asks about the belly
+    assert result["__interrupt__"][0].value["question"].startswith("Are the breast and belly mostly")
 
-    result = guide.invoke(Command(resume="yes"), config)
+
+def test_the_answer_updates_the_probabilities_and_settles_it():
+    guide, config, result = run([0.5, 0.45, 0.05])
+    question = result["__interrupt__"][0].value["question"]
+    answer = "yes" if "blue" in question else "no"  # the bird has a blue belly: it's the sparkling violetear
+    result = guide.invoke(Command(resume=answer), config)
     assert result["card"]["name"] == "Colibri coruscans"
-    # the question isn't written twice when resuming, and each candidate is judged once
-    assert writer.calls == ["question"] + [f"fits {t.scientific_name}" for t in TAXA]
 
 
-def test_ruling_one_out_lets_the_classifier_decide_among_the_rest():
-    guide, config, _, _ = run([0.5, 0.45, 0.05])
-    result = guide.invoke(Command(resume="no"), config)
-    # coruscans is out; cyanotus has 0.45 / 0.5 = 90% of what's left
-    assert result["card"]["name"] == "Colibri cyanotus"
-
-
-def test_after_two_unhelpful_answers_the_card_stays_at_the_genus():
-    guide, config, _, _ = run([0.5, 0.45, 0.05])
-    result = guide.invoke(Command(resume="not sure"), config)
-    assert result["__interrupt__"][0].value["question"] == "Is the tail long?"  # a second, different question
-    result = guide.invoke(Command(resume="not sure"), config)
+def test_cant_tell_three_times_stays_at_the_genus():
+    guide, config, result = run([0.5, 0.45, 0.05])
+    for _ in range(3):
+        if "card" in result:
+            break
+        result = guide.invoke(Command(resume="can't tell"), config)
     assert result["card"]["name"] == "Colibri"
     assert result["card"]["rank"] == "genus"
 
 
+def test_without_field_marks_it_doesnt_ask_and_stays_at_the_genus():
+    _, _, result = run([0.5, 0.45, 0.05], marks={})
+    assert "Field guide: no question would tell these candidates apart" in result["trace"]
+    assert result["card"]["rank"] == "genus"
+
+
 def test_threatened_species_hide_their_location():
-    _, _, result, _ = run([0.05, 0.05, 0.9])
+    _, _, result = run([0.05, 0.05, 0.9])
     assert result["card"]["red_list"] == "EN"
     assert result["card"]["hide_location"]

@@ -6,15 +6,17 @@
     narrow by region ──(one candidate left, or one is sure)───▶ card
        │
        ▼
-    ask ──▶ wait for the human (interrupt) ──▶ decide ──(settled, or 2 questions asked)──▶ card
-     ▲                                            │
-     └──────────────(still unsure)────────────────┘
+    ask ──(no useful question left)───────────────────────────▶ card
+     │ ▲
+     ▼ └──(still unsure, < 3 questions)──┐
+    wait for the human (interrupt) ──▶ update ──(sure, or 3 questions)──▶ card
 
-The classifier proposes the candidates and their probabilities; the language model writes the question,
-judges for each candidate whether the answer fits its notes, and writes the card. It never names a species of its own.
+The question is the one with the most expected information about the candidates (domain/field_marks.py),
+and the answer updates the classifier's probabilities with Bayes' rule. The language model only writes
+the final card from cited text; it never chooses a species.
 """
 import operator
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, TypedDict
 
@@ -22,38 +24,36 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from bioclip_co.domain import field_marks
 from bioclip_co.domain.abstention import descend
 from bioclip_co.domain.taxonomy import RANKS, Taxon
 from bioclip_co.ports.field_guide import Candidate, Encyclopedia, FieldGuideWriter, Occurrences
 
-MAX_CANDIDATES = 3  # more than three is too much to tell apart with one question
-MAX_QUESTIONS = 2
-REGION_CHECKS = 8  # only the most likely candidates are looked up in GBIF; the rest barely matter
+POOL = 8  # candidates the agent keeps track of; the rest of the node barely matters
+MAX_QUESTIONS = 3
 THREATENED = {"VU", "EN", "CR"}
+
+
+class Question(TypedDict):
+    feature: str
+    value: str
+    text: str
 
 
 class GuideState(TypedDict, total=False):
     probs: list[float]  # species probabilities from the classifier
     region: str | None  # Colombian department, as GBIF spells it
-    path: tuple[str, ...]  # the deepest node the classifier trusts
+    path: tuple[str, ...]  # the deepest node the agent trusts
     candidates: list[Candidate]
-    notes: dict[str, str]
-    question: str
-    answer: str
-    asked: list[str]
+    question: Question | None
+    asked: list[tuple[str, str]]
     species: str | None
     card: dict
     trace: Annotated[list[str], operator.add]  # what happened, step by step, for the page
 
 
-def common_path(taxa: Sequence[Taxon]) -> tuple[str, ...]:
-    """The deepest node all these taxa share."""
-    path = []
-    for names in zip(*(t.lineage for t in taxa)):
-        if len(set(names)) > 1:
-            break
-        path.append(names[0])
-    return tuple(path)
+def top_two(candidates: list[Candidate]) -> str:
+    return ", ".join(f"{c['name']} {c['p']:.0%}" for c in candidates[:2])
 
 
 def build_field_guide(
@@ -62,71 +62,70 @@ def build_field_guide(
     occurrences: Occurrences,
     encyclopedia: Encyclopedia,
     writer: FieldGuideWriter,
+    marks: Mapping[str, Mapping],
 ):
     by_name = {t.scientific_name: t for t in taxa}
+
+    def settle(candidates: list[Candidate]) -> dict:
+        """Where the candidates' probabilities let us stand: the same walk down the tree as the classifier."""
+        pred = descend([by_name[c["name"]] for c in candidates], [c["p"] for c in candidates], threshold)
+        return {"path": pred.path, "species": pred.name if pred.reached_species else None}
 
     def classify(state: GuideState) -> GuideState:
         pred = descend(taxa, state["probs"], threshold)
         inside = [(t, p) for t, p in zip(taxa, state["probs"]) if t.lineage[: len(pred.path)] == pred.path]
+        inside = sorted(inside, key=lambda tp: -tp[1])[:POOL]
         total = sum(p for _, p in inside)
-        candidates = sorted(
-            ({"name": t.scientific_name, "common": t.common_name, "p": p / total} for t, p in inside),
-            key=lambda c: -c["p"],
-        )
-        update = {"path": pred.path, "candidates": candidates, "trace": [f"BioCLIP: {pred.rank} {pred.name}, {pred.confidence:.0%} sure"]}
-        if pred.reached_species:
-            update["species"] = pred.name
-        return update
+        candidates = [{"name": t.scientific_name, "common": t.common_name, "p": p / total} for t, p in inside]
+        return {
+            "path": pred.path,
+            "species": pred.name if pred.reached_species else None,
+            "candidates": candidates,
+            "asked": [],
+            "trace": [f"BioCLIP: {pred.rank} {pred.name}, {pred.confidence:.0%} sure"],
+        }
 
     def narrow_by_region(state: GuideState) -> GuideState:
-        region, candidates = state["region"], state["candidates"][:REGION_CHECKS]
-        with ThreadPoolExecutor(max_workers=REGION_CHECKS) as pool:
+        region, candidates = state["region"], state["candidates"]
+        with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
             counts = list(pool.map(lambda c: occurrences.records_in(c["name"], region), candidates))
         kept = [c for c, n in zip(candidates, counts) if n > 0]
         if not kept:  # nothing recorded there: don't throw away what the photo says
             return {"trace": [f"GBIF: none of the {len(candidates)} candidates has records in {region}, keeping them all"]}
         total = sum(c["p"] for c in kept)
         kept = [{**c, "p": c["p"] / total} for c in kept]
-        update = {"candidates": kept, "trace": [f"GBIF: {len(kept)} of {len(candidates)} candidates recorded in {region}"]}
-        if len(kept) == 1 or kept[0]["p"] >= threshold:
-            update["species"] = kept[0]["name"]
-        return update
+        return {"candidates": kept, **settle(kept), "trace": [f"GBIF: {len(kept)} of {len(candidates)} candidates recorded in {region}"]}
 
     def ask(state: GuideState) -> GuideState:
-        top = state["candidates"][:MAX_CANDIDATES]
-        with ThreadPoolExecutor(max_workers=MAX_CANDIDATES) as pool:
-            found = list(pool.map(lambda c: encyclopedia.summary(c["name"]), top))
-        notes = state.get("notes", {}) | {c["name"]: note["extract"] if note else "" for c, note in zip(top, found)}
-        asked = state.get("asked", [])
-        question = writer.question(top, notes, asked)
+        candidates = state["candidates"]
+        best = field_marks.best_question([c["name"] for c in candidates], [c["p"] for c in candidates], marks, state["asked"])
+        if best is None:
+            return {"question": None, "trace": ["Field guide: no question would tell these candidates apart"]}
+        feature, value, gain = best
+        text = field_marks.question_text(feature, value)
         return {
-            "candidates": top, "notes": notes, "question": question, "asked": asked + [question],
-            "trace": [f"Field guide asks: {question}"],
+            "question": {"feature": feature, "value": value, "text": text},
+            "asked": state["asked"] + [(feature, value)],
+            "trace": [f"Field guide asks: {text} (expected information: {gain:.2f} bits)"],
         }
 
     def wait_for_answer(state: GuideState) -> GuideState:
         # the graph pauses here until the person answers (POST /agent/answer resumes it)
-        answer = interrupt({"question": state["question"], "candidates": state["candidates"]})
-        return {"answer": answer, "trace": [f"You: {answer}"]}
-
-    def decide(state: GuideState) -> GuideState:
-        candidates = state["candidates"]
-        verdicts = [writer.fits(c, state["notes"].get(c["name"], ""), state["question"], state["answer"]) for c in candidates]
-        kept = [c for c, v in zip(candidates, verdicts) if v is not False] or candidates  # all ruled out: keep them
-        ruled_out = [c["name"] for c, v in zip(candidates, verdicts) if v is False]
-        total = sum(c["p"] for c in kept)
-        kept = [{**c, "p": c["p"] / total} for c in kept]
-        # the classifier's probabilities still decide among the candidates that are left
-        species = kept[0]["name"] if len(kept) == 1 or kept[0]["p"] >= threshold else None
-        path = by_name[species].lineage if species else common_path([by_name[c["name"]] for c in kept])
-        said = f"rules out {', '.join(ruled_out)}" if ruled_out else "the answer doesn't rule anything out"
-        return {"candidates": kept, "species": species, "path": path, "trace": [f"Field guide: {said}"]}
+        answer = interrupt({"question": state["question"]["text"], "candidates": state["candidates"]})
+        names = [c["name"] for c in state["candidates"]]
+        q = state["question"]
+        probs = field_marks.update(names, [c["p"] for c in state["candidates"]], marks, q["feature"], q["value"], answer)
+        candidates = sorted(({**c, "p": p} for c, p in zip(state["candidates"], probs)), key=lambda c: -c["p"])
+        return {"candidates": candidates, **settle(candidates), "trace": [f"You: {answer}", f"Now: {top_two(candidates)}"]}
 
     def card(state: GuideState) -> GuideState:
         species = state.get("species")
         name = species or state["path"][-1]
         common = next((c["common"] for c in state["candidates"] if c["name"] == species), "")
-        note = encyclopedia.summary(name)
+        try:
+            note = encyclopedia.summary(name)
+        except OSError:  # no internet, or the API is throttling: the card says so instead of failing
+            note = None
         status = occurrences.red_list(species) if species else None
         sources = [note["url"]] if note else []
         if species:
@@ -147,19 +146,17 @@ def build_field_guide(
             return "card"
         return "narrow_by_region" if state.get("region") else "ask"
 
+    def after_answer(state: GuideState) -> str:
+        return "card" if state.get("species") or len(state["asked"]) >= MAX_QUESTIONS else "ask"
+
     graph = StateGraph(GuideState)
-    for node in [classify, narrow_by_region, ask, wait_for_answer, decide, card]:
+    for node in [classify, narrow_by_region, ask, wait_for_answer, card]:
         graph.add_node(node.__name__, node)
     graph.add_edge(START, "classify")
     graph.add_conditional_edges("classify", after_classify, ["card", "narrow_by_region", "ask"])
     graph.add_conditional_edges("narrow_by_region", lambda s: "card" if s.get("species") else "ask", ["card", "ask"])
-    graph.add_edge("ask", "wait_for_answer")
-    graph.add_edge("wait_for_answer", "decide")
-    graph.add_conditional_edges(
-        "decide",
-        lambda s: "card" if s.get("species") or len(s["asked"]) >= MAX_QUESTIONS else "ask",
-        ["card", "ask"],
-    )
+    graph.add_conditional_edges("ask", lambda s: "wait_for_answer" if s["question"] else "card", ["wait_for_answer", "card"])
+    graph.add_conditional_edges("wait_for_answer", after_answer, ["card", "ask"])
     graph.add_edge("card", END)
     # the checkpointer keeps each conversation's state between the question and the answer
     return graph.compile(checkpointer=InMemorySaver())
