@@ -97,24 +97,46 @@ is sure and turn dotted where it stops.
 
 ## The field guide agent
 
-When BioCLIP stops before the species, a small agent takes over. It's a LangGraph graph with a local LLM
-(Qwen3 4B through Ollama, fully on the GPU next to BioCLIP):
+When BioCLIP stops before the species (about a third of the photos), an agent takes over and asks you about what you see.
+It's a LangGraph graph; the questions come from probability, not from a language model:
 
-![The field guide asking two questions and staying at the family](docs/agent.png)
+![The field guide asking about the bird and updating the candidates](docs/agent.png)
 
 1. **Region.** If you say where the photo was taken, it asks GBIF which candidates have been recorded in that department
    and drops the others.
-2. **Question.** It reads the Wikipedia description of the top candidates and asks you one yes/no question about a single
-   visible feature. LangGraph pauses the graph (`interrupt`) until you answer.
-3. **Rule out, don't pick.** For each candidate separately, the LLM judges whether your answer agrees with its description.
-   The ones that contradict it are dropped, and **BioCLIP's own probabilities** decide among the rest. Up to two questions.
-4. **Card.** A short field-guide entry written only from the cited text, with the IUCN category. For threatened species
-   the page says the exact location is hidden.
+2. **The most informative question.** Every species has field marks (crown, throat, belly, back and tail colour; bill and
+   tail shape) that a vision-language model read off 5 validation photos each, kept only when 3 of 5 photos agree.
+   The agent asks the yes/no question with the largest expected information gain over the candidates, weighted by
+   BioCLIP's probabilities. A feature every likely candidate shares is worth 0 bits and is never asked.
+3. **Bayes' rule.** Your answer updates the candidates' probabilities; LangGraph pauses the graph (`interrupt`) until you
+   answer. When one species passes the threshold it stops, otherwise it asks again (up to 3 questions) or stays at the
+   genus or family.
+4. **Card.** A local LLM (Qwen3 4B through Ollama) writes a short field-guide entry, only from the cited Wikipedia text,
+   with the IUCN category. For threatened species the page says the exact location is hidden.
 
-The LLM never names a species on its own; it only works with BioCLIP's candidates. My first version let it pick the
-answer among three candidates, and it sometimes picked the one the answer had just ruled out; judging one candidate
-at a time fixed that. It still sometimes asks a question that doesn't separate the candidates (in the screenshot,
-both remaining hummingbirds have a violet crown), and then it does the right thing: it stays at the family.
+**Does it help?** With a simulated person who answers from the true species' field marks, it turns 61% of the unsure
+photos into the right species with about two questions. Over all 1,000 test photos, right species go from 62.8% to
+83.6%, and wrong answers from 4.1% to 7.9%: a real trade, and the best case, since the simulated person agrees with the
+field guide. Details and the noisy-person numbers in [results/agent](results/agent/README.md).
+
+**How I got here.** My first agent had the LLM write the questions and judge the answers. It asked about features every
+candidate shared and once chose the species the answer had just ruled out. Then I had it extract field marks from
+Wikipedia text, and it filled the gaps by guessing (a white belly for the yellow-bellied great kiskadee). Looking at
+photos, voting, and choosing questions by information gain fixed both.
+
+## Why not just ask a multimodal LLM?
+
+I asked one: Qwen3-VL 8B, locally, on the same 200 test photos (one per species).
+
+| | species accuracy (pick 1 of 200) | knows when it's guessing? |
+|---|---:|---|
+| Qwen3-VL 8B, ~8,000 M parameters | 30.5% | no: says "95% sure" on 184 of 200 photos, wrong on 67% of them |
+| BioCLIP, ~150 M parameters | **80.5%** | yes: 1.5% wrong answers at the calibrated threshold |
+
+Without the list of candidates it names the right species 18% of the time, and in 71% of the photos it names a bird
+that isn't one of the 200 candidates. A specialist 50 times smaller is more than twice as accurate and its confidence
+means something; the general model is better used for what it's good at, like describing colours in a photo.
+[results/vlm](results/vlm/README.md)
 
 ## Serving and MLOps, all on this machine
 
@@ -141,7 +163,7 @@ The first run downloads the BioCLIP and CLIP weights (about 600 MB each). It wor
 Each service runs in its own terminal with [`run.sh`](run.sh):
 
 ```bash
-./run.sh ollama     # local LLM for the agent (after: ollama pull qwen3:4b-instruct)
+./run.sh ollama     # local LLM for the agent's cards (after: ollama pull qwen3:4b-instruct)
 ./run.sh api        # http://localhost:8000
 ./run.sh web        # http://localhost:5173
 ./run.sh mlflow     # http://localhost:5000
@@ -156,6 +178,8 @@ uv run scripts/build_testset.py data/candidates/aves_colombia.csv -k 5
 uv run scripts/build_testset.py data/candidates/aves_colombia.csv -k 5 -o data/valset --exclude data/testset/manifest.csv
 ./run.sh evaluate && ./run.sh calibrate && ./run.sh evaluate
 uv run --group analysis scripts/embedding_map.py
+uv run scripts/field_marks.py && uv run scripts/evaluate_agent.py      # needs ./run.sh ollama
+uv run scripts/evaluate_vlm.py --one-per-species                         # after: ollama pull qwen3-vl:8b-instruct
 ./run.sh onnx
 ./run.sh gate
 ./run.sh lambda
@@ -170,15 +194,17 @@ src/bioclip_co/
 ├── domain/          plain Python, no ML libraries
 │   ├── taxonomy.py      Taxon, adding probabilities up the tree
 │   ├── abstention.py    walking down the tree with a threshold
-│   └── metrics.py       accuracy per rank, mistake depth, risk-coverage, calibration error
+│   ├── metrics.py       accuracy per rank, mistake depth, risk-coverage, calibration error
+│   └── field_marks.py   the most informative question, Bayes' rule, majority vote over photos
 ├── ports/           what the app needs from the outside: an image-text encoder, an encyclopedia,
 │                    occurrence records, a field-guide writer (the LLM)
-├── adapters/        OpenCLIP, ONNX Runtime, GBIF, Wikipedia, Ollama, the candidates CSV
+├── adapters/        OpenCLIP, ONNX Runtime, GBIF, Wikipedia, Ollama (text and vision), the candidates CSV
 ├── application/     zero-shot probabilities, calibration, the LangGraph field guide
 └── entrypoints/     FastAPI app, AWS Lambda handler, MLflow model
-scripts/             build the photo sets, evaluate, calibrate, export to ONNX, benchmark, quality gate
+scripts/             build the photo sets, evaluate, calibrate, field marks, agent and VLM evaluations,
+                     export to ONNX, benchmark, quality gate
 web/                 the React demo
-tests/               52 tests; none of them loads a model or calls an API
+tests/               61 tests; none of them loads a model or calls an API
 ```
 
 Swapping models is writing an adapter: the ONNX version sits behind the same port as the PyTorch one, and the tests
@@ -190,8 +216,9 @@ plug in a fake encoder, a fake LLM and fake GBIF/Wikipedia.
   species, and my filter threw them all away. Photos are now looked up by taxon id.
 - The silhouette score said nothing about the embedding space (near zero for both models); neighbor agreement did.
 - Quantizing the whole model to INT8 halved its accuracy (above).
-- The agent's small LLM sometimes asks questions that don't separate the candidates. And the GBIF filter didn't help in the
-  department I tried most (Valle del Cauca): it's so well surveyed that every candidate had records there.
+- Letting an LLM write the agent's questions, and extracting field marks from Wikipedia text (see the agent section).
+- The GBIF filter didn't help in the department I tried most (Valle del Cauca): it's so well surveyed that every
+  candidate had records there.
 - Five photos per species is enough for the totals, not for per-species conclusions.
 
 ## Roadmap
@@ -204,7 +231,8 @@ plug in a fake encoder, a fake LLM and fake GBIF/Wikipedia.
 - [x] Threshold picked on a validation set, BioCLIP calibrated
 - [x] Embedding space: UMAP and nearest-neighbor agreement
 - [x] ONNX / INT8: size, latency and accuracy
-- [x] Field guide agent: LangGraph + a local LLM, region filter, follow-up questions
+- [x] Field guide agent: LangGraph, region filter, questions chosen by information gain, Bayes' rule
+- [x] Agent evaluated with simulated people; a local multimodal LLM compared against BioCLIP
 - [x] Jenkins pipeline with a model quality gate, MLflow tracking and registry
 - [x] AWS SAM template, tested locally
 - [ ] Try my own photos

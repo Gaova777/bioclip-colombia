@@ -69,8 +69,8 @@ export function FieldGuide({ image }: { image: Blob }) {
       <header className="guide-head">
         <h2>Field guide</h2>
         <p>
-          When BioCLIP stops before the species, a local language model checks which candidates live in your region and
-          asks you about what you saw. It only chooses among BioCLIP's candidates.
+          When BioCLIP stops before the species, the field guide checks which candidates live in your region and asks
+          the question that best tells them apart. Your answers update BioCLIP's probabilities; it never adds a species.
         </p>
       </header>
 
